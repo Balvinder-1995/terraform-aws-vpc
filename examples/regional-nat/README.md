@@ -40,10 +40,12 @@ The key configuration for Regional NAT Gateway is:
 ```hcl
 enable_nat_gateway = true
 nat_gateway_connectivity_type = {
-  availability_mode = "regional" # "regional" or "zonal"
-  eip_allocation    = "auto"     # "auto" or "manual"
+  availability_mode = "regional" # "regional" or "zonal" (default)
+  eip_allocation    = "auto"     # "auto" (default) or "manual"
 }
 ```
+
+With `eip_allocation = "auto"` (used in this example) the module creates no Elastic IPs: AWS allocates and manages them as the NAT Gateway expands into an Availability Zone. With `eip_allocation = "manual"` the module creates one Elastic IP per Availability Zone in `azs`, or uses the ones you pass via `external_nat_ip_ids` when `reuse_nat_ips = true`.
 
 ## Comparison: Regional vs Zonal NAT Gateway
 
@@ -74,8 +76,9 @@ From: https://aws.amazon.com/vpc/pricing/
 
 After applying this configuration, you can see:
 - Single NAT Gateway ID in `natgw_ids` output (list with one element)
-- All private route tables route to the same NAT Gateway
-- One Elastic IP allocated for the regional NAT Gateway
+- All private route tables route to the same NAT Gateway (`private_nat_gateway_route_ids`)
+- The addresses of the regional NAT Gateway in `natgw_regional_addresses`: one entry per Availability Zone the NAT Gateway is active in, with the allocation ID, network interface ID and public IP assigned by AWS
+- `nat_ids` and `nat_public_ips` are empty: with `eip_allocation = "auto"` the module creates no Elastic IPs. They are only populated with `eip_allocation = "manual"`
 
 ## Requirements
 

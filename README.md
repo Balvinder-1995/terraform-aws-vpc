@@ -68,28 +68,31 @@ If, on the other hand, `single_nat_gateway = true`, then `aws_eip.nat` would onl
 Passing the IPs into the module is done by setting two variables `reuse_nat_ips = true` and `external_nat_ip_ids = "${aws_eip.nat.*.id}"`.
 
 **For Regional NAT Gateways:**
-When using Regional NAT Gateway with `nat_gateway_connectivity_type.eip_allocation = "manual"`, the module will allocate one EIP per Availability Zone. For example, if you have 3 AZs:
+A Regional NAT Gateway with `nat_gateway_connectivity_type.eip_allocation = "manual"` needs one EIP per Availability Zone in `azs`. By default the module allocates them; to bring your own, set `reuse_nat_ips = true` and pass one EIP allocation ID per Availability Zone, in the same order as `azs`. For example, if you have 3 AZs:
 
 ```hcl
 resource "aws_eip" "regional_nat" {
   count = 3  # One per AZ
 
-  vpc = true
+  domain = "vpc"
 }
 
 module "vpc" {
   source = "terraform-aws-modules/vpc/aws"
+
+  # The rest of arguments are omitted for brevity
 
   enable_nat_gateway = true
   nat_gateway_connectivity_type = {
     availability_mode = "regional"
     eip_allocation    = "manual"
   }
-  reuse_nat_ips       = false
+  reuse_nat_ips       = true                          # <= Skip creation of EIPs for the NAT Gateway
+  external_nat_ip_ids = aws_eip.regional_nat[*].id    # <= One EIP per AZ, mapped to `azs` in order
 }
 ```
 
-Alternatively, you can use `eip_allocation = "auto"` to let AWS automatically manage EIPs for the Regional NAT Gateway.
+Alternatively, you can use `eip_allocation = "auto"` (the default) to let AWS allocate and manage the EIPs for the Regional NAT Gateway. In that mode the module creates no EIPs, so `nat_ids` and `nat_public_ips` are empty; the addresses AWS assigns are exposed in the `natgw_regional_addresses` output.
 
 ## NAT Gateway Scenarios
 
@@ -163,8 +166,10 @@ nat_gateway_connectivity_type = {
 ```
 
 **EIP Allocation Options:**
-- `"auto"`: AWS automatically provisions and manages EIPs for the Regional NAT Gateway
-- `"manual"`: You provide EIPs via `external_nat_ip_ids` (one EIP per AZ). The module will create EIPs based on the number of AZs if `reuse_nat_ips = false`
+- `"auto"` (default): AWS allocates and manages the EIPs for the Regional NAT Gateway. The module creates no EIPs, so `nat_ids` and `nat_public_ips` are empty; the addresses AWS assigns (one per AZ the NAT Gateway is active in) are exposed in the `natgw_regional_addresses` output
+- `"manual"`: One EIP per AZ in `azs`. The module creates them, or uses the ones you provide via `external_nat_ip_ids` (mapped to `azs` in order) when `reuse_nat_ips = true`
+
+`availability_mode = "zonal"` is the default and behaves exactly as if `nat_gateway_connectivity_type` was not set: `single_nat_gateway` and `one_nat_gateway_per_az` decide how many zonal NAT Gateways are created, and `eip_allocation` is ignored.
 
 **Important Notes:**
 1. **Expansion Timing**: When deploying workloads in a new AZ, the regional NAT Gateway typically takes 15-20 minutes (up to 60 minutes) to expand to that AZ. During this period, traffic may be temporarily routed through existing AZs.
@@ -544,8 +549,8 @@ No modules.
 | <a name="input_enable_network_address_usage_metrics"></a> [enable\_network\_address\_usage\_metrics](#input\_enable\_network\_address\_usage\_metrics) | Determines whether network address usage metrics are enabled for the VPC | `bool` | `null` | no |
 | <a name="input_enable_public_redshift"></a> [enable\_public\_redshift](#input\_enable\_public\_redshift) | Controls if redshift should have public routing table | `bool` | `false` | no |
 | <a name="input_enable_vpn_gateway"></a> [enable\_vpn\_gateway](#input\_enable\_vpn\_gateway) | Should be true if you want to create a new VPN Gateway resource and attach it to the VPC | `bool` | `false` | no |
-| <a name="input_external_nat_ip_ids"></a> [external\_nat\_ip\_ids](#input\_external\_nat\_ip\_ids) | List of EIP IDs to be assigned to the NAT Gateways (used in combination with reuse\_nat\_ips) | `list(string)` | `[]` | no |
-| <a name="input_external_nat_ips"></a> [external\_nat\_ips](#input\_external\_nat\_ips) | List of EIPs to be used for `nat_public_ips` output (used in combination with reuse\_nat\_ips and external\_nat\_ip\_ids). For regional NAT gateways, EIPs will be mapped to availability zones in order. | `list(string)` | `[]` | no |
+| <a name="input_external_nat_ip_ids"></a> [external\_nat\_ip\_ids](#input\_external\_nat\_ip\_ids) | List of EIP IDs to be assigned to the NAT Gateways (used in combination with reuse\_nat\_ips). For a regional NAT Gateway with `eip_allocation = "manual"`, provide one EIP ID per availability zone in `azs`; they are mapped to the availability zones in order | `list(string)` | `[]` | no |
+| <a name="input_external_nat_ips"></a> [external\_nat\_ips](#input\_external\_nat\_ips) | List of EIPs to be used for `nat_public_ips` output (used in combination with reuse\_nat\_ips and external\_nat\_ip\_ids) | `list(string)` | `[]` | no |
 | <a name="input_flow_log_cloudwatch_iam_role_arn"></a> [flow\_log\_cloudwatch\_iam\_role\_arn](#input\_flow\_log\_cloudwatch\_iam\_role\_arn) | The ARN for the IAM role that's used to post flow logs to a CloudWatch Logs log group. When flow\_log\_destination\_arn is set to ARN of Cloudwatch Logs, this argument needs to be provided | `string` | `""` | no |
 | <a name="input_flow_log_cloudwatch_iam_role_conditions"></a> [flow\_log\_cloudwatch\_iam\_role\_conditions](#input\_flow\_log\_cloudwatch\_iam\_role\_conditions) | Additional conditions of the CloudWatch role assumption policy | <pre>list(object({<br/>    test     = string<br/>    variable = string<br/>    values   = list(string)<br/>  }))</pre> | `[]` | no |
 | <a name="input_flow_log_cloudwatch_log_group_class"></a> [flow\_log\_cloudwatch\_log\_group\_class](#input\_flow\_log\_cloudwatch\_log\_group\_class) | Specified the log class of the log group. Possible values are: `STANDARD` or `INFREQUENT_ACCESS` | `string` | `null` | no |
@@ -595,7 +600,7 @@ No modules.
 | <a name="input_map_public_ip_on_launch"></a> [map\_public\_ip\_on\_launch](#input\_map\_public\_ip\_on\_launch) | Specify true to indicate that instances launched into the subnet should be assigned a public IP address. Default is `false` | `bool` | `false` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name to be used on all the resources as identifier | `string` | `""` | no |
 | <a name="input_nat_eip_tags"></a> [nat\_eip\_tags](#input\_nat\_eip\_tags) | Additional tags for the NAT EIP | `map(string)` | `{}` | no |
-| <a name="input_nat_gateway_connectivity_type"></a> [nat\_gateway\_connectivity\_type](#input\_nat\_gateway\_connectivity\_type) | Configuration block for NAT Gateway connectivity type.<br/>- availability\_mode: "zonal" (default) or "regional"<br/>  - 'zonal': Traditional AZ-specific NAT gateways that require public subnets<br/>  - 'regional': A single NAT Gateway that automatically scales across all AZs (does not require public subnets)<br/>- eip\_allocation: "auto" (default) or "manual"<br/>  - 'auto': Automatically provision EIPs for the NAT Gateway<br/>  - 'manual': Will create the set of EIPs based on the number of AZs | <pre>object({<br/>    availability_mode = string # "zonal" or "regional"<br/>    eip_allocation    = string # "auto" or "manual"<br/>  })</pre> | <pre>{<br/>  "availability_mode": null,<br/>  "eip_allocation": null<br/>}</pre> | no |
+| <a name="input_nat_gateway_connectivity_type"></a> [nat\_gateway\_connectivity\_type](#input\_nat\_gateway\_connectivity\_type) | Configuration block for NAT Gateway connectivity type.<br/>- availability\_mode: "zonal" (default) or "regional"<br/>  - 'zonal': Traditional AZ-specific NAT gateways that require public subnets. Behaves exactly as if this variable was not set (`single_nat_gateway` and `one_nat_gateway_per_az` apply)<br/>  - 'regional': A single NAT Gateway that automatically scales across all AZs (does not require public subnets)<br/>- eip\_allocation: "auto" (default) or "manual". Only used when availability\_mode is "regional"<br/>  - 'auto': AWS automatically allocates and manages the EIPs of the NAT Gateway (the module creates no EIPs; see the `natgw_regional_addresses` output)<br/>  - 'manual': One EIP per AZ in `azs`, created by the module, or supplied via `external_nat_ip_ids` when `reuse_nat_ips = true` | <pre>object({<br/>    availability_mode = optional(string, "zonal") # "zonal" or "regional"<br/>    eip_allocation    = optional(string, "auto")  # "auto" or "manual"<br/>  })</pre> | `{}` | no |
 | <a name="input_nat_gateway_destination_cidr_block"></a> [nat\_gateway\_destination\_cidr\_block](#input\_nat\_gateway\_destination\_cidr\_block) | Used to pass a custom destination route for private NAT Gateway. If not specified, the default 0.0.0.0/0 is used as a destination route | `string` | `"0.0.0.0/0"` | no |
 | <a name="input_nat_gateway_tags"></a> [nat\_gateway\_tags](#input\_nat\_gateway\_tags) | Additional tags for the NAT gateways | `map(string)` | `{}` | no |
 | <a name="input_one_nat_gateway_per_az"></a> [one\_nat\_gateway\_per\_az](#input\_one\_nat\_gateway\_per\_az) | Should be true if you want only one NAT Gateway per availability zone. Requires `var.azs` to be set, and the number of `public_subnets` created to be greater than or equal to the number of availability zones specified in `var.azs` | `bool` | `false` | no |
@@ -751,10 +756,11 @@ No modules.
 | <a name="output_intra_subnets_cidr_blocks"></a> [intra\_subnets\_cidr\_blocks](#output\_intra\_subnets\_cidr\_blocks) | List of cidr\_blocks of intra subnets |
 | <a name="output_intra_subnets_ipv6_cidr_blocks"></a> [intra\_subnets\_ipv6\_cidr\_blocks](#output\_intra\_subnets\_ipv6\_cidr\_blocks) | List of IPv6 cidr\_blocks of intra subnets in an IPv6 enabled VPC |
 | <a name="output_name"></a> [name](#output\_name) | The name of the VPC specified as argument to this module |
-| <a name="output_nat_ids"></a> [nat\_ids](#output\_nat\_ids) | List of allocation ID of Elastic IPs created for AWS NAT Gateway |
-| <a name="output_nat_public_ips"></a> [nat\_public\_ips](#output\_nat\_public\_ips) | List of public Elastic IPs created for AWS NAT Gateway |
+| <a name="output_nat_ids"></a> [nat\_ids](#output\_nat\_ids) | List of allocation ID of Elastic IPs created for AWS NAT Gateway. Empty for a regional NAT Gateway with `eip_allocation = "auto"`, where AWS allocates the EIPs (see `natgw_regional_addresses`) |
+| <a name="output_nat_public_ips"></a> [nat\_public\_ips](#output\_nat\_public\_ips) | List of public Elastic IPs created for AWS NAT Gateway. Empty for a regional NAT Gateway with `eip_allocation = "auto"`, where AWS allocates the EIPs (see `natgw_regional_addresses`) |
 | <a name="output_natgw_ids"></a> [natgw\_ids](#output\_natgw\_ids) | List of NAT Gateway IDs |
-| <a name="output_natgw_interface_ids"></a> [natgw\_interface\_ids](#output\_natgw\_interface\_ids) | List of Network Interface IDs assigned to NAT Gateways |
+| <a name="output_natgw_interface_ids"></a> [natgw\_interface\_ids](#output\_natgw\_interface\_ids) | List of Network Interface IDs assigned to NAT Gateways. For a regional NAT Gateway, one per availability zone it is active in |
+| <a name="output_natgw_regional_addresses"></a> [natgw\_regional\_addresses](#output\_natgw\_regional\_addresses) | List of addresses of the regional NAT Gateway, one per availability zone it is active in (`allocation_id`, `association_id`, `availability_zone`, `availability_zone_id`, `network_interface_id`, `public_ip`, `status`). Only populated for a regional NAT Gateway |
 | <a name="output_outpost_network_acl_arn"></a> [outpost\_network\_acl\_arn](#output\_outpost\_network\_acl\_arn) | ARN of the outpost network ACL |
 | <a name="output_outpost_network_acl_id"></a> [outpost\_network\_acl\_id](#output\_outpost\_network\_acl\_id) | ID of the outpost network ACL |
 | <a name="output_outpost_subnet_arns"></a> [outpost\_subnet\_arns](#output\_outpost\_subnet\_arns) | List of ARNs of outpost subnets |

@@ -50,13 +50,18 @@ output "natgw_ids" {
   value       = module.vpc.natgw_ids
 }
 
+output "natgw_regional_addresses" {
+  description = "Addresses of the regional NAT Gateway, one per availability zone it is active in (allocation ID, network interface ID, public IP, ...)"
+  value       = module.vpc.natgw_regional_addresses
+}
+
 output "nat_public_ips" {
-  description = "List of public Elastic IPs created for AWS NAT Gateway"
+  description = "List of public Elastic IPs created by the module for the NAT Gateway (empty with `eip_allocation = \"auto\"`, where AWS allocates the EIPs)"
   value       = module.vpc.nat_public_ips
 }
 
 output "nat_ids" {
-  description = "List of allocation ID of Elastic IPs created for AWS NAT Gateway"
+  description = "List of allocation ID of Elastic IPs created by the module for the NAT Gateway (empty with `eip_allocation = \"auto\"`, where AWS allocates the EIPs)"
   value       = module.vpc.nat_ids
 }
 

@@ -1208,16 +1208,22 @@ resource "aws_route" "private_ipv6_egress" {
 
 locals {
   nat_gateway_is_regional = var.nat_gateway_connectivity_type.availability_mode == "regional"
-  nat_gateway_count       = local.nat_gateway_is_regional ? 1 : var.single_nat_gateway || var.nat_gateway_connectivity_type.availability_mode == "zonal" ? 1 : var.one_nat_gateway_per_az ? length(var.azs) : local.max_subnet_length
+  nat_gateway_count       = local.nat_gateway_is_regional ? 1 : var.single_nat_gateway ? 1 : var.one_nat_gateway_per_az ? length(var.azs) : local.max_subnet_length
   nat_gateway_ips         = var.reuse_nat_ips ? var.external_nat_ip_ids : aws_eip.nat[*].id
 
-  # Regional NAT Gateway EIP handling
-  # Always create EIPs automatically based on the number of AZs
-  regional_nat_gateway_eip_count = local.nat_gateway_is_regional ? length(var.azs) : 0
+  # Regional NAT Gateway in manual EIP mode needs one EIP per AZ; those are either
+  # created by the module or supplied by the caller via `external_nat_ip_ids`
+  nat_gateway_is_regional_manual = local.nat_gateway_is_regional && var.nat_gateway_connectivity_type.eip_allocation == "manual"
+  regional_nat_gateway_eip_count = local.nat_gateway_is_regional_manual ? length(var.azs) : 0
+  regional_nat_gateway_ips       = var.reuse_nat_ips ? var.external_nat_ip_ids : aws_eip.regional_nat[*].id
+
+  # A regional NAT Gateway has no `network_interface_id`/`public_ip` of its own; it
+  # exposes one address (EIP + ENI) per AZ it is active in via `regional_nat_gateway_address`
+  natgw_regional_addresses = flatten(aws_nat_gateway.regional[*].regional_nat_gateway_address)
 }
 
 resource "aws_eip" "nat" {
-  count = local.create_vpc && var.enable_nat_gateway && !local.nat_gateway_is_regional && !var.reuse_nat_ips && (var.nat_gateway_connectivity_type.availability_mode == "zonal" || var.nat_gateway_connectivity_type.availability_mode == null) ? local.nat_gateway_count : 0
+  count = local.create_vpc && var.enable_nat_gateway && !local.nat_gateway_is_regional && !var.reuse_nat_ips ? local.nat_gateway_count : 0
 
   region = var.region
 
@@ -1238,7 +1244,7 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_eip" "regional_nat" {
-  count = local.create_vpc && var.enable_nat_gateway && local.nat_gateway_is_regional && var.nat_gateway_connectivity_type.eip_allocation == "manual" && var.nat_gateway_connectivity_type.availability_mode == "regional" ? local.regional_nat_gateway_eip_count : 0
+  count = local.create_vpc && var.enable_nat_gateway && local.nat_gateway_is_regional_manual && !var.reuse_nat_ips ? local.regional_nat_gateway_eip_count : 0
 
   region = var.region
 
@@ -1296,8 +1302,8 @@ resource "aws_nat_gateway" "regional" {
   availability_mode = var.nat_gateway_connectivity_type.availability_mode
 
   dynamic "availability_zone_address" {
-    for_each = var.nat_gateway_connectivity_type.eip_allocation == "manual" && var.nat_gateway_connectivity_type.availability_mode == "regional" ? {
-      for idx, az in var.azs : az => aws_eip.regional_nat[idx].id
+    for_each = local.nat_gateway_is_regional_manual ? {
+      for idx, az in var.azs : az => local.regional_nat_gateway_ips[idx]
     } : {}
     content {
       allocation_ids    = toset([availability_zone_address.value])
