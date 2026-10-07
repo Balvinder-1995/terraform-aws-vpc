@@ -1241,7 +1241,7 @@ variable "one_nat_gateway_per_az" {
 
 variable "nat_gateway_connectivity_type" {
   description = <<-EOT
-    Configuration block for NAT Gateway connectivity type.
+    Configuration map for the NAT Gateway connectivity type. Both keys are optional and fall back to their defaults when omitted.
     - availability_mode: "zonal" (default) or "regional"
       - 'zonal': Traditional AZ-specific NAT gateways that require public subnets. Behaves exactly as if this variable was not set (`single_nat_gateway` and `one_nat_gateway_per_az` apply)
       - 'regional': A single NAT Gateway that automatically scales across all AZs (does not require public subnets)
@@ -1249,18 +1249,20 @@ variable "nat_gateway_connectivity_type" {
       - 'auto': AWS automatically allocates and manages the EIPs of the NAT Gateway (the module creates no EIPs; see the `natgw_regional_addresses` output)
       - 'manual': One EIP per AZ in `azs`, created by the module, or supplied via `external_nat_ip_ids` when `reuse_nat_ips = true`
   EOT
-  type = object({
-    availability_mode = optional(string, "zonal") # "zonal" or "regional"
-    eip_allocation    = optional(string, "auto")  # "auto" or "manual"
-  })
-  default  = {}
-  nullable = false
+  # map(string) rather than object({ optional(...) }) so the module keeps working on Terraform 1.0.x (optional() defaults need 1.3+)
+  type    = map(string)
+  default = {}
+
+  validation {
+    condition     = alltrue([for k in try(keys(var.nat_gateway_connectivity_type), []) : contains(["availability_mode", "eip_allocation"], k)])
+    error_message = "The only supported keys are 'availability_mode' and 'eip_allocation'."
+  }
   # validation {
-  #   condition     = contains(["zonal", "regional"], var.nat_gateway_connectivity_type.availability_mode)
+  #   condition     = contains(["zonal", "regional"], try(var.nat_gateway_connectivity_type.availability_mode, "zonal"))
   #   error_message = "The availability_mode must be either 'zonal' or 'regional'."
   # }
   # validation {
-  #   condition     = contains(["auto", "manual"], var.nat_gateway_connectivity_type.eip_allocation)
+  #   condition     = contains(["auto", "manual"], try(var.nat_gateway_connectivity_type.eip_allocation, "auto"))
   #   error_message = "The eip_allocation must be either 'auto' or 'manual'."
   # }
 }

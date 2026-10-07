@@ -1207,13 +1207,17 @@ resource "aws_route" "private_ipv6_egress" {
 ################################################################################
 
 locals {
-  nat_gateway_is_regional = var.nat_gateway_connectivity_type.availability_mode == "regional"
+  # Omitted (or null) keys fall back to the documented defaults, so `{}` behaves like the zonal setup this module always had
+  nat_gateway_availability_mode = try(var.nat_gateway_connectivity_type.availability_mode, "zonal")
+  nat_gateway_eip_allocation    = try(var.nat_gateway_connectivity_type.eip_allocation, "auto")
+
+  nat_gateway_is_regional = local.nat_gateway_availability_mode == "regional"
   nat_gateway_count       = local.nat_gateway_is_regional ? 1 : var.single_nat_gateway ? 1 : var.one_nat_gateway_per_az ? length(var.azs) : local.max_subnet_length
   nat_gateway_ips         = var.reuse_nat_ips ? var.external_nat_ip_ids : aws_eip.nat[*].id
 
   # Regional NAT Gateway in manual EIP mode needs one EIP per AZ; those are either
   # created by the module or supplied by the caller via `external_nat_ip_ids`
-  nat_gateway_is_regional_manual = local.nat_gateway_is_regional && var.nat_gateway_connectivity_type.eip_allocation == "manual"
+  nat_gateway_is_regional_manual = local.nat_gateway_is_regional && local.nat_gateway_eip_allocation == "manual"
   regional_nat_gateway_eip_count = local.nat_gateway_is_regional_manual ? length(var.azs) : 0
   regional_nat_gateway_ips       = var.reuse_nat_ips ? var.external_nat_ip_ids : aws_eip.regional_nat[*].id
 
@@ -1299,7 +1303,7 @@ resource "aws_nat_gateway" "regional" {
   vpc_id = aws_vpc.this[0].id
 
   connectivity_type = "public"
-  availability_mode = var.nat_gateway_connectivity_type.availability_mode
+  availability_mode = local.nat_gateway_availability_mode
 
   dynamic "availability_zone_address" {
     for_each = local.nat_gateway_is_regional_manual ? {
